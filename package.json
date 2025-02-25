@@ -16,7 +16,8 @@
     "lint": "eslint lib --fix",
     "clean": "rm -rf node_modules package-lock.json dist",
     "build": "npm run lint && tsc",
-    "patch": "npm run build && npm version patch && npm publish --access public"
+    "patch": "npm version patch",
+    "publish": "npm publish --access public"
   },
   "files": [
     "dist/lib/**/*"
