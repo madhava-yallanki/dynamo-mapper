@@ -1,8 +1,8 @@
 import { DynamoDB, TransactionCanceledException } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocument, type PutCommandInput, type TransactWriteCommandInput } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocument, type PutCommandInput } from '@aws-sdk/lib-dynamodb';
 import { VersionMismatchError, NotFoundError } from '../errors/index.js';
 import { Logger } from '../logger/index.js';
-import { ConstructorItem, EntityBase, EntityConfig, PrimaryKey, PrimaryKeyNames, Table } from '../entities/base.js';
+import { ConstructorItem, EntityBase, EntityConfig, PrimaryKey, Table, KeyConfig } from '../entities/base.js';
 import { FilterBuilder } from './filters.js';
 import { KeyConditionBuilder } from './keyCondition.js';
 import { UpdateExpression } from './updateExpression.js';
@@ -10,7 +10,9 @@ import { Expression, Filter, nameAlias, QueryParams, UpdateOptions } from './uti
 
 const logger = new Logger({ module: import.meta.url });
 
-type GetOptions = { consistentRead?: boolean };
+type GetOptions = {
+  consistentRead?: boolean;
+};
 
 type QueryOptions<E, PA> = {
   indexName?: string;
@@ -20,20 +22,13 @@ type QueryOptions<E, PA> = {
   attributes?: PA;
 };
 
-export type QueryResult<E> = { items: E[]; lastEvaluatedKey: DocClientKey | undefined };
+type QueryResult<E, PA> = {
+  items: PA extends Array<keyof E> ? Pick<E, PA[number]>[] : E[];
+  lastEvaluatedKey: DocClientKey | undefined;
+};
 
 type PutOptions = {
   skipVersionCheck?: boolean;
-};
-
-type PutConditionArgs = {
-  currentVersion: number;
-  skipVersionCheck?: boolean;
-};
-
-type UpsertCondition = {
-  expression: string;
-  attributeValues: Record<string, string | number>;
 };
 
 type DocClientKey = Record<string, string | number>;
@@ -58,7 +53,6 @@ export class DynamoMapper {
           removeUndefinedValues: true,
         },
       });
-      logger.info('Created and cached Dynamo DB document client');
     }
 
     this.client = DynamoMapper._cachedClient;
@@ -102,20 +96,14 @@ export class DynamoMapper {
   }
 
   async transactPut<T extends EntityBase[]>(items: T): Promise<T> {
-    if (items.length === 0) {
-      throw new Error('Items to save cannot be empty');
-    }
-
-    if (items.length === 1) {
-      await this.putItem(items[0]);
-      return items;
+    if (items.length === 0 || items.length > 100) {
+      throw new Error('Number of items must be between 1 and 100.');
     }
 
     try {
-      for (const { TransactItems } of this.buildTransactBatches(items)) {
-        const response = await this.client.transactWrite({ TransactItems });
-        logger.info({ response }, `Put transaction completed for ${TransactItems?.length} items`);
-      }
+      const TransactItems = items.map((item) => ({ Put: this.buildPutItemInput(item) }));
+      const response = await this.client.transactWrite({ TransactItems });
+      logger.info({ response }, `Put transaction completed for ${TransactItems?.length} items`);
 
       return items;
     } catch (error) {
@@ -131,21 +119,6 @@ export class DynamoMapper {
     }
   }
 
-  private buildTransactBatches<T extends EntityBase[]>(items: T): TransactWriteCommandInput[] {
-    if (items.length <= 100) {
-      return [{ TransactItems: items.map((item) => ({ Put: this.buildPutItemInput(item) })) }];
-    }
-
-    const chunkSize = 100;
-    const batches: TransactWriteCommandInput[] = [];
-    logger.warn({ items: items.length, chunkSize }, 'Chunking transact operation of unsupported length.');
-    for (let index = 0; index < items.length; index += chunkSize) {
-      const chunk = items.slice(index, index + chunkSize);
-      batches.push({ TransactItems: chunk.map((item) => ({ Put: this.buildPutItemInput(item) })) });
-    }
-    return batches;
-  }
-
   private buildPutItemInput<E extends EntityBase>(item: E, options?: PutOptions): PutCommandInput {
     const entityConfig = item.getEntityConfig();
     const docClientKey = buildKey(entityConfig.table, entityConfig.keyGenerator(item));
@@ -153,27 +126,14 @@ export class DynamoMapper {
     const currentVersion = item.versionNumber || 0;
     item.versionNumber = currentVersion + 1;
 
-    const putCondition = this.buildPutCondition({ currentVersion, skipVersionCheck: options?.skipVersionCheck });
-    logger.debug({ docClientKey, putCondition }, 'Assigned keys and version');
-
-    return {
-      TableName: entityConfig.table.tableName,
-      Item: item,
-      ConditionExpression: putCondition?.expression,
-      ExpressionAttributeValues: putCondition?.attributeValues,
-      ReturnValues: 'NONE',
-    };
-  }
-
-  private buildPutCondition(args: PutConditionArgs): UpsertCondition | undefined {
-    if (args.skipVersionCheck) {
-      return undefined;
+    const input: PutCommandInput = { TableName: entityConfig.table.tableName, Item: item, ReturnValues: 'NONE' };
+    if (options?.skipVersionCheck) {
+      return input;
     }
 
-    return {
-      expression: 'versionNumber = :currentVersion OR attribute_not_exists(versionNumber)',
-      attributeValues: { ':currentVersion': args.currentVersion },
-    };
+    input.ConditionExpression = 'versionNumber = :currentVersion OR attribute_not_exists(versionNumber)';
+    input.ExpressionAttributeValues = { ':currentVersion': currentVersion };
+    return input;
   }
 
   async updateItem<E extends EntityBase>(
@@ -183,9 +143,8 @@ export class DynamoMapper {
     options?: UpdateOptions<E>,
   ): Promise<E> {
     const docClientKey = buildKey(entityClass.entityConfig.table, primaryKey);
-    logger.info({ primaryKey, docClientKey }, 'Generated Dynamo DB key');
     const { text, nameAliases, valueAliases } = new UpdateExpression({ item, options }).build();
-    logger.info({ text, nameAliases, valueAliases }, 'Constructed update expression');
+    logger.info({ docClientKey, text, nameAliases, valueAliases }, 'Constructed update expression');
 
     try {
       const response = await this.client.update({
@@ -229,12 +188,12 @@ export class DynamoMapper {
     entityClass: EntityTarget<E>,
     queryParams: QueryParams,
     options?: QueryOptions<E, PA>,
-  ): Promise<QueryResult<PA extends Array<keyof E> ? Partial<E> : E>> {
-    const primaryKeyNames = getPrimaryKeyNames(entityClass.entityConfig, options?.indexName);
-    const keyCondition = new KeyConditionBuilder({ primaryKeyNames, queryParams }).build();
+  ): Promise<QueryResult<E, PA>> {
+    const keyConfig = getKeyConfig(entityClass.entityConfig, options?.indexName);
+    const keyCondition = new KeyConditionBuilder({ keyConfig, queryParams }).build();
     const projection = buildProjection(options?.attributes as string[]);
     const filter = new FilterBuilder<E>({ filters: options?.filters }).build();
-    logger.debug({ primaryKeyNames, keyCondition, projection, filter }, 'Derived query options');
+    logger.debug({ keyConfig, keyCondition, projection, filter }, 'Derived query options');
 
     const response = await this.client.query({
       TableName: entityClass.entityConfig.table.tableName,
@@ -248,12 +207,12 @@ export class DynamoMapper {
       Limit: options?.limit,
     });
 
-    const items = (response.Items || []).map((item) => new entityClass(item as E) as E);
+    const items = (response.Items || []).map((item) => new entityClass(item as E)) as QueryResult<E, PA>['items'];
     return { items: items, lastEvaluatedKey: response.LastEvaluatedKey };
   }
 }
 
-const getPrimaryKeyNames = (entityConfig: EntityConfig, indexName?: string): PrimaryKeyNames => {
+const getKeyConfig = (entityConfig: EntityConfig, indexName?: string): KeyConfig => {
   if (!indexName) {
     return entityConfig.table;
   }
@@ -266,9 +225,9 @@ const getPrimaryKeyNames = (entityConfig: EntityConfig, indexName?: string): Pri
 };
 
 const buildKey = (table: Table, primaryKey: PrimaryKey): DocClientKey => {
-  const key: DocClientKey = { [table.partitionKeyName]: primaryKey.partitionKey };
-  if (table.sortKeyName && primaryKey.sortKey !== undefined) {
-    key[table.sortKeyName] = primaryKey.sortKey;
+  const key: DocClientKey = { [table.pkName]: primaryKey.partitionKey };
+  if (table.skName && primaryKey.sortKey !== undefined) {
+    key[table.skName] = primaryKey.sortKey;
   }
 
   return key;

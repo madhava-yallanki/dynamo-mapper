@@ -20,7 +20,12 @@ export type QueryOperatorOptions = {
   operator: Exclude<Operator, Operator.Between | Operator.Exists>;
   sortKey: AttributeValue;
 };
-export type QueryBetweenOptions = { operator: Operator.Between; sortKeyValues: [AttributeValue, AttributeValue] };
+
+export type QueryBetweenOptions = {
+  operator: Operator.Between;
+  sortKeyValues: [AttributeValue, AttributeValue];
+};
+
 export type QueryParams = { partitionKey: AttributeValue } & (
   | { operator?: never }
   | QueryOperatorOptions

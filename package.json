@@ -5,7 +5,7 @@
     "name": "Madhava Yallanki",
     "email": "madhava@yallanki.dev"
   },
-  "license": "UNLICENSED",
+  "license": "MIT",
   "type": "module",
   "main": "dist/lib/index.js",
   "types": "dist/lib/index.d.ts",
@@ -16,7 +16,7 @@
     "lint": "eslint lib --fix",
     "clean": "rm -rf node_modules package-lock.json dist",
     "build": "npm run lint && tsc",
-    "release": "npm run build"
+    "patch": "npm run build && npm version patch && npm publish --access public"
   },
   "files": [
     "dist/lib/**/*"
