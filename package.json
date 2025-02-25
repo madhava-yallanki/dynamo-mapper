@@ -1,0 +1,48 @@
+{
+  "name": "@madhava-yallanki/dynamo-mapper",
+  "version": "1.0.0",
+  "author": {
+    "name": "Madhava Yallanki",
+    "email": "madhava@yallanki.dev"
+  },
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "dist/lib/index.js",
+  "types": "dist/lib/index.d.ts",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "lint": "eslint lib --fix",
+    "clean": "rm -rf node_modules package-lock.json dist",
+    "build": "npm run lint && tsc",
+    "release": "npm run build"
+  },
+  "files": [
+    "dist/lib/**/*"
+  ],
+  "prettier": {
+    "singleQuote": true,
+    "printWidth": 120
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.751.0",
+    "@aws-sdk/lib-dynamodb": "^3.751.0",
+    "pino": "^9.6.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.20.0",
+    "@types/aws-lambda": "^8.10.147",
+    "@types/node": "^22.13.4",
+    "@typescript-eslint/parser": "^8.24.0",
+    "eslint": "^9.20.1",
+    "eslint-config-prettier": "^10.0.1",
+    "eslint-import-resolver-typescript": "^3.8.0",
+    "eslint-plugin-import": "^2.31.0",
+    "eslint-plugin-prettier": "^5.2.3",
+    "prettier": "^3.5.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.24.0"
+  }
+}
