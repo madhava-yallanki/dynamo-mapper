@@ -13,11 +13,10 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "lint": "eslint lib --fix",
+    "lint": "eslint --fix",
     "clean": "rm -rf node_modules package-lock.json dist",
-    "build": "npm run lint && tsc",
-    "patch": "npm version patch",
-    "publish": "npm publish --access public"
+    "build": "npm dedupe && npm run lint && tsc",
+    "patch": "npm version patch"
   },
   "files": [
     "dist/lib/**/*"
@@ -32,18 +31,9 @@
     "pino": "^9.6.0"
   },
   "devDependencies": {
-    "@eslint/js": "^9.20.0",
+    "@madhava-yallanki/ts-tools": "^1.0.3",
     "@types/aws-lambda": "^8.10.147",
-    "@types/node": "^22.13.4",
-    "@typescript-eslint/parser": "^8.24.0",
-    "eslint": "^9.20.1",
-    "eslint-config-prettier": "^10.0.1",
-    "eslint-import-resolver-typescript": "^3.8.0",
-    "eslint-plugin-import": "^2.31.0",
-    "eslint-plugin-prettier": "^5.2.3",
-    "prettier": "^3.5.1",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.7.3",
-    "typescript-eslint": "^8.24.0"
+    "@types/node": "^22.13.5",
+    "typescript": "^5.7.3"
   }
 }
