@@ -1,5 +1,5 @@
-import { DynamoDB, TransactionCanceledException } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocument, type PutCommandInput } from '@aws-sdk/lib-dynamodb';
+import { DynamoDB, TransactionCanceledException, ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocument, type PutCommandInput, type DeleteCommandInput } from '@aws-sdk/lib-dynamodb';
 import { VersionMismatchError, NotFoundError } from '../errors/index.js';
 import { Logger } from '../logger/index.js';
 import { ConstructorItem, EntityBase, EntityConfig, PrimaryKey, Table, KeyConfig } from '../entities/base.js';
@@ -167,21 +167,40 @@ export class DynamoMapper {
     }
   }
 
-  async deleteItem<E extends EntityBase>(entityClass: EntityTarget<E>, primaryKey: PrimaryKey): Promise<E | undefined> {
-    const docClientKey = buildKey(entityClass.entityConfig.table, primaryKey);
-    logger.debug({ primaryKey, docClientKey }, 'Generated Dynamo DB key');
+  async deleteItem<E extends EntityBase>(
+    entityClass: EntityTarget<E>,
+    primaryKey: PrimaryKey,
+    conditions?: Partial<E>,
+  ): Promise<E | undefined> {
+    try {
+      const docClientKey = buildKey(entityClass.entityConfig.table, primaryKey);
+      const response = await this.client.delete({
+        TableName: entityClass.entityConfig.table.tableName,
+        Key: docClientKey,
+        ReturnValues: 'ALL_OLD',
+        Expected: this.buildDeleteConditions(conditions),
+      });
 
-    const response = await this.client.delete({
-      TableName: entityClass.entityConfig.table.tableName,
-      Key: docClientKey,
-      ReturnValues: 'ALL_OLD',
-    });
+      if (!response.Attributes) return undefined;
+      return new entityClass(response.Attributes as E) as E;
+    } catch (error) {
+      if (error instanceof ConditionalCheckFailedException) {
+        return undefined;
+      }
 
-    if (!response.Attributes) {
-      return undefined;
+      logger.error({ error }, 'Error in delete item request');
+      throw error;
     }
+  }
 
-    return new entityClass(response.Attributes as E) as E;
+  private buildDeleteConditions<E>(conditions?: Partial<E>): DeleteCommandInput['Expected'] {
+    if (!conditions) return undefined;
+
+    const expected: DeleteCommandInput['Expected'] = {};
+    for (const [cKey, cVal] of Object.entries(conditions)) {
+      expected[cKey] = { Value: cVal };
+    }
+    return expected;
   }
 
   async query<E extends EntityBase, PA extends Array<keyof E> | undefined = undefined>(
