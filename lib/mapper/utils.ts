@@ -27,7 +27,7 @@ export type QueryBetweenOptions = {
 };
 
 export type QueryParams = { partitionKey: AttributeValue } & (
-  | { operator?: never }
+  | { sortKey?: never; operator?: never }
   | QueryOperatorOptions
   | QueryBetweenOptions
 );
