@@ -1,3 +1,5 @@
+import { EntityConfig, KeyConfig, PrimaryKey } from '../entities/base.js';
+
 export const nameAlias = (param: string): string => `#${param}`;
 export const valueAlias = (param: string): string => `:${param}`;
 export const fromValueAlias = (param: string): string => `:${param}From`;
@@ -15,6 +17,8 @@ export enum Operator {
 }
 
 type AttributeValue = string | number;
+
+export type DocClientKey = Record<string, string | number>;
 
 export type QueryOperatorOptions = {
   operator: Exclude<Operator, Operator.Between | Operator.Exists>;
@@ -48,3 +52,24 @@ export type UpdateOptions<E> = {
   listAppendFields?: Partial<Record<keyof E, unknown[]>>;
   incrementFields?: Partial<Record<keyof E, number>>;
 };
+
+export function getKeyConfig(entityConfig: EntityConfig, indexName?: string): KeyConfig {
+  if (!indexName) {
+    return entityConfig.table;
+  }
+
+  if (!entityConfig.indexes || !entityConfig.indexes[indexName]) {
+    throw new Error(`Index ${indexName} is not defined on the Entity`);
+  }
+
+  return entityConfig.indexes[indexName];
+}
+
+export function buildKey(table: KeyConfig, primaryKey: PrimaryKey): DocClientKey {
+  const key: DocClientKey = { [table.pkName]: primaryKey.partitionKey };
+  if (table.skName && primaryKey.sortKey !== undefined) {
+    key[table.skName] = primaryKey.sortKey;
+  }
+
+  return key;
+}

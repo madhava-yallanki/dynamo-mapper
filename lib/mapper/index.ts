@@ -2,11 +2,12 @@ import { DynamoDB, TransactionCanceledException, ConditionalCheckFailedException
 import { DynamoDBDocument, type PutCommandInput, type DeleteCommandInput } from '@aws-sdk/lib-dynamodb';
 import { VersionMismatchError, NotFoundError } from '../errors/index.js';
 import { Logger } from '../logger/index.js';
-import { ConstructorItem, EntityBase, EntityConfig, PrimaryKey, Table, KeyConfig } from '../entities/base.js';
+import { ConstructorItem, EntityBase, PrimaryKey } from '../entities/base.js';
 import { FilterBuilder } from './filters.js';
 import { KeyConditionBuilder } from './keyCondition.js';
 import { UpdateExpression } from './updateExpression.js';
-import { Expression, Filter, nameAlias, QueryParams, UpdateOptions } from './utils.js';
+import { buildExclusiveStartKey, buildProjection, type ExclusiveStartKeyArgs } from './query.js';
+import { Filter, QueryParams, UpdateOptions, DocClientKey, getKeyConfig, buildKey } from './utils.js';
 
 const logger = new Logger({ module: import.meta.url });
 
@@ -20,6 +21,7 @@ type QueryOptions<E, PA> = {
   scanIndexForward?: boolean;
   limit?: number;
   attributes?: PA;
+  exclusiveStartKey?: ExclusiveStartKeyArgs['exclusiveStartKey'];
 };
 
 type QueryResult<E, PA> = {
@@ -30,8 +32,6 @@ type QueryResult<E, PA> = {
 type PutOptions = {
   skipVersionCheck?: boolean;
 };
-
-type DocClientKey = Record<string, string | number>;
 
 type EntityTarget<E extends EntityBase> = typeof EntityBase & {
   new (item: ConstructorItem<E>): E;
@@ -212,7 +212,8 @@ export class DynamoMapper {
     const keyCondition = new KeyConditionBuilder({ keyConfig, queryParams }).build();
     const projection = buildProjection(options?.attributes as string[]);
     const filter = new FilterBuilder<E>({ filters: options?.filters }).build();
-    logger.debug({ keyConfig, keyCondition, projection, filter }, 'Derived query options');
+    const exclusiveStartKey = buildExclusiveStartKey(entityClass.entityConfig, options);
+    logger.debug({ keyConfig, exclusiveStartKey, keyCondition, projection, filter }, 'Derived query options');
 
     const response = await this.client.query({
       TableName: entityClass.entityConfig.table.tableName,
@@ -224,41 +225,10 @@ export class DynamoMapper {
       ExpressionAttributeNames: { ...keyCondition.nameAliases, ...projection.nameAliases, ...filter.nameAliases },
       ScanIndexForward: options?.scanIndexForward,
       Limit: options?.limit,
+      ExclusiveStartKey: exclusiveStartKey,
     });
 
     const items = (response.Items || []).map((item) => new entityClass(item as E)) as QueryResult<E, PA>['items'];
     return { items: items, lastEvaluatedKey: response.LastEvaluatedKey };
   }
-}
-
-const getKeyConfig = (entityConfig: EntityConfig, indexName?: string): KeyConfig => {
-  if (!indexName) {
-    return entityConfig.table;
-  }
-
-  if (!entityConfig.indexes || !entityConfig.indexes[indexName]) {
-    throw new Error(`Index ${indexName} is not defined on the Entity`);
-  }
-
-  return entityConfig.indexes[indexName];
-};
-
-const buildKey = (table: Table, primaryKey: PrimaryKey): DocClientKey => {
-  const key: DocClientKey = { [table.pkName]: primaryKey.partitionKey };
-  if (table.skName && primaryKey.sortKey !== undefined) {
-    key[table.skName] = primaryKey.sortKey;
-  }
-
-  return key;
-};
-
-function buildProjection(attributes?: string[]): Partial<Pick<Expression, 'text' | 'nameAliases'>> {
-  if (!attributes || attributes.length === 0) {
-    return {};
-  }
-
-  const text = attributes.map((attribute) => nameAlias(attribute)).join(',');
-  const nameAliases: Expression['nameAliases'] = {};
-  attributes.forEach((attribute) => (nameAliases[nameAlias(attribute)] = attribute));
-  return { text, nameAliases };
 }
