@@ -19,6 +19,7 @@ export type EntityConfig = {
   table: Table;
   keyGenerator: KeyGeneratorFunction;
   indexes?: Record<string, KeyConfig>;
+  encryptedFields?: string[];
 };
 
 export class EntityBase {

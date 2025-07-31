@@ -26,14 +26,15 @@
     "printWidth": 120
   },
   "dependencies": {
-    "@aws-sdk/client-dynamodb": "^3.751.0",
-    "@aws-sdk/lib-dynamodb": "^3.751.0",
-    "pino": "^9.6.0"
+    "@aws-crypto/client-node": "^4.2.1",
+    "@aws-sdk/client-dynamodb": "^3.857.0",
+    "@aws-sdk/lib-dynamodb": "^3.857.0",
+    "pino": "^9.7.0"
   },
   "devDependencies": {
-    "@madhava-yallanki/ts-tools": "^1.0.3",
-    "@types/aws-lambda": "^8.10.147",
-    "@types/node": "^22.13.5",
-    "typescript": "^5.7.3"
+    "@madhava-yallanki/ts-tools": "^1.0.5",
+    "@types/aws-lambda": "^8.10.152",
+    "@types/node": "^24.1.0",
+    "typescript": "^5.8.3"
   }
 }

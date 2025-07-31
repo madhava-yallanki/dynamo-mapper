@@ -2,18 +2,18 @@ import { EntityBase } from '../entities/base.js';
 import { Expression, nameAlias, valueAlias, UpdateOptions } from './utils.js';
 
 type UpdateExpressionArgs<E> = {
-  item: Partial<E>;
+  attributes: Partial<E>;
   options?: UpdateOptions<E>;
 };
 
 export class UpdateExpression<E extends EntityBase> {
   private readonly expression: Expression;
-  private readonly item: Partial<E>;
+  private readonly attributes: Partial<E>;
   private readonly options: UpdateOptions<E> | undefined;
   private readonly textElements: string[];
 
-  constructor({ item, options }: UpdateExpressionArgs<E>) {
-    this.item = item;
+  constructor({ attributes, options }: UpdateExpressionArgs<E>) {
+    this.attributes = attributes;
     this.options = options;
     this.expression = { text: '', nameAliases: {}, valueAliases: {} };
     this.textElements = [`versionNumber = versionNumber + ${valueAlias('versionInc')}`];
@@ -30,7 +30,7 @@ export class UpdateExpression<E extends EntityBase> {
   }
 
   private setExpressionForItem(): void {
-    for (const [attributeName, attributeValue] of Object.entries(this.item)) {
+    for (const [attributeName, attributeValue] of Object.entries(this.attributes)) {
       this.textElements.push(`${nameAlias(attributeName)} = ${valueAlias(attributeName)}`);
       this.expression.nameAliases[nameAlias(attributeName)] = attributeName;
       this.expression.valueAliases[valueAlias(attributeName)] = (attributeValue ?? null) as never;
