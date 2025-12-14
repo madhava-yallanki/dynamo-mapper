@@ -6,15 +6,19 @@ import { ConstructorItem, EntityBase, PrimaryKey } from '../entities/base.js';
 import { FilterBuilder } from './filters.js';
 import { KeyConditionBuilder } from './keyCondition.js';
 import { UpdateExpression } from './updateExpression.js';
-import { buildExclusiveStartKey, buildProjection, type ExclusiveStartKeyArgs } from './query.js';
-import { Filter, QueryParams, UpdateOptions, DocClientKey, getKeyConfig, buildKey } from './utils.js';
+import { buildExclusiveStartKey, type ExclusiveStartKeyArgs } from './query.js';
+import { getKeyConfig, buildKey, nameAlias } from './utils.js';
+import type { Filter, QueryParams, UpdateOptions, DocClientKey, Expression } from './utils.js';
 import { Crypto } from './crypto.js';
 
 const logger = new Logger({ module: import.meta.url });
 
-type GetOptions = {
+type GetOptions<PA> = {
   consistentRead?: boolean;
+  attributes?: PA;
 };
+
+type GetResult<E, PA> = PA extends Array<keyof E> ? Pick<E, PA[number]> | undefined : E | undefined;
 
 type QueryOptions<E, PA> = {
   indexName?: string;
@@ -36,6 +40,11 @@ type PutOptions = {
 
 type EntityTarget<E extends EntityBase> = typeof EntityBase & {
   new (item: ConstructorItem<E>): E;
+};
+
+type ProjectionArgs<E> = {
+  attributes?: Array<keyof E>;
+  encryptedFields?: string[];
 };
 
 type DynamoMapperArgs = {
@@ -61,23 +70,27 @@ export class DynamoMapper {
     this.crypto = new Crypto();
   }
 
-  async getItem<E extends EntityBase>(
+  async getItem<E extends EntityBase, PA extends Array<keyof E> | undefined = undefined>(
     entityClass: EntityTarget<E>,
     primaryKey: PrimaryKey,
-    options?: GetOptions,
-  ): Promise<E | undefined> {
+    options?: GetOptions<PA>,
+  ): Promise<GetResult<E, PA>> {
+    const { table, encryptedFields } = entityClass.entityConfig;
+    const projection = this.buildProjection({ attributes: options?.attributes, encryptedFields });
     const response = await this.client.get({
-      TableName: entityClass.entityConfig.table.tableName,
-      Key: buildKey(entityClass.entityConfig.table, primaryKey),
+      TableName: table.tableName,
+      Key: buildKey(table, primaryKey),
       ConsistentRead: options?.consistentRead,
+      ProjectionExpression: projection.text,
+      ExpressionAttributeNames: projection.nameAliases,
     });
 
     if (!response.Item) {
-      return undefined;
+      return undefined as GetResult<E, PA>;
     }
 
     const item = new entityClass(response.Item as E) as E;
-    return await this.decryptItem(item);
+    return (await this.decryptItem(item)) as GetResult<E, PA>;
   }
 
   async putItem<E extends EntityBase>(item: E, options?: PutOptions): Promise<E> {
@@ -183,14 +196,15 @@ export class DynamoMapper {
     queryParams: QueryParams,
     options?: QueryOptions<E, PA>,
   ): Promise<QueryResult<E, PA>> {
+    const { table, encryptedFields } = entityClass.entityConfig;
     const keyConfig = getKeyConfig(entityClass.entityConfig, options?.indexName);
     const keyCondition = new KeyConditionBuilder({ keyConfig, queryParams }).build();
-    const projection = buildProjection(options?.attributes as string[]);
+    const projection = this.buildProjection({ attributes: options?.attributes, encryptedFields });
     const filter = new FilterBuilder<E>({ filters: options?.filters }).build();
     const exclusiveStartKey = buildExclusiveStartKey(entityClass.entityConfig, options);
 
     const response = await this.client.query({
-      TableName: entityClass.entityConfig.table.tableName,
+      TableName: table.tableName,
       IndexName: options?.indexName,
       KeyConditionExpression: keyCondition.text,
       FilterExpression: filter.text,
@@ -218,7 +232,7 @@ export class DynamoMapper {
   }
 
   private async decryptField<E>(item: E, field: string): Promise<void> {
-    const encryptedKey = `encrypted_${field}`;
+    const encryptedKey = this.getEncryptedKey(field);
     const cipherText = item[encryptedKey as keyof E] as string | undefined;
     if (!cipherText) {
       return;
@@ -236,9 +250,13 @@ export class DynamoMapper {
     }
 
     const cipherText = await this.crypto.encrypt(JSON.stringify(plainText));
-    const encryptedKey = `encrypted_${field}`;
+    const encryptedKey = this.getEncryptedKey(field);
     item[encryptedKey as keyof E] = cipherText as never;
     delete item[field as keyof E];
+  }
+
+  private getEncryptedKey(field: string): string {
+    return `encrypted_${field}`;
   }
 
   private async encryptItem<T>(item: T, encryptedFields?: string[]): Promise<T> {
@@ -277,5 +295,22 @@ export class DynamoMapper {
       expected[cKey] = { Value: cVal };
     }
     return expected;
+  }
+
+  private buildProjection<E>({ attributes, encryptedFields }: ProjectionArgs<E>): Partial<Expression> {
+    if (!attributes || attributes.length === 0) {
+      return {};
+    }
+
+    const fields = (attributes as string[]).map((a) => (encryptedFields?.includes(a) ? this.getEncryptedKey(a) : a));
+    logger.info({ fields }, 'Constructed projection fields');
+
+    const nameAliases: Expression['nameAliases'] = {};
+    const text = fields.map((field) => nameAlias(field)).join(',');
+    fields.forEach((field) => {
+      nameAliases[nameAlias(field)] = field;
+    });
+
+    return { text, nameAliases };
   }
 }
