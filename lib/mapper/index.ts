@@ -140,7 +140,7 @@ export class DynamoMapper {
     const docClientKey = buildKey(entityClass.entityConfig.table, primaryKey);
     const encrypted = await this.encryptItem(attributes, entityClass.entityConfig.encryptedFields);
     const { text, nameAliases, valueAliases } = new UpdateExpression({ attributes: encrypted, options }).build();
-    logger.info({ docClientKey, text, nameAliases }, 'Constructed update expression');
+    logger.debug({ docClientKey, text, nameAliases }, 'Constructed update expression');
 
     try {
       const response = await this.client.update({
@@ -303,7 +303,7 @@ export class DynamoMapper {
     }
 
     const fields = (attributes as string[]).map((a) => (encryptedFields?.includes(a) ? this.getEncryptedKey(a) : a));
-    logger.info({ fields }, 'Constructed projection fields');
+    logger.debug({ fields }, 'Constructed projection fields');
 
     const nameAliases: Expression['nameAliases'] = {};
     const text = fields.map((field) => nameAlias(field)).join(',');
